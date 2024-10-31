@@ -3,6 +3,7 @@ const express = require('express');
 const mongoose = require('mongoose');
 const bodyParser = require('body-parser');
 const nodemailer = require('nodemailer');
+const cors = require('cors');
 const Report = require('./models/report'); // Assuming your report model is here
 require('dotenv').config();
 
@@ -10,6 +11,7 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 // Middleware
+app.use(cors());
 app.use(bodyParser.json());
 app.use(express.json());
 app.use(express.static('public'));
@@ -25,7 +27,7 @@ mongoose.connect(process.env.MONGODB_URI, {
 console.error('error connecting to MongoDB:', error));
 
 
-app.get('/',( req, res) => {
+app.get('/reports',( req, res) => {
     res.sendFile(__dirname + '/index.html');
     })
 
@@ -41,7 +43,7 @@ const transporter = nodemailer.createTransport({
 // Endpoint to submit reports
 app.post('/reports', async (req, res) => { 
     const { collegeCode, incidentCategory, incidentType, description, date } = req.body;
-     console.log(req.body);
+     console.log('Recieved report:', req.body);
     
 
     if(!collegeCode || !incidentCategory || !incidentType || !description) {
@@ -53,7 +55,7 @@ app.post('/reports', async (req, res) => {
         incidentCategory,
         incidentType,
         description,
-        date: date ? new Date(req.body.date) : new Date()
+        date: date ? new Date(date) : new Date()
     });
 
     try {
@@ -74,10 +76,10 @@ app.post('/reports', async (req, res) => {
 
         await transporter.sendMail(mailOptions);
         
-        res.status(200).send('Report submitted successfully!');
+        res.status(201).json({ message: 'Report submitted successfully!'});
     } catch (error) {
         console.error('Error submitting report:', error);
-        res.status(500).send('Error submitting report');
+        res.status(500).json({ error:'Error submitting report'});
     }
 });
 
