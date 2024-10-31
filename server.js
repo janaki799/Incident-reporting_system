@@ -7,7 +7,7 @@ const Report = require('./models/report'); // Assuming your report model is here
 require('dotenv').config();
 
 const app = express();
-const PORT = process.env.PORT || 5000;
+const PORT = process.env.PORT || 3000;
 
 // Middleware
 app.use(bodyParser.json());
@@ -16,6 +16,15 @@ app.use(bodyParser.json());
 mongoose.connect(process.env.MONGODB_URI, {
     useNewUrlParser: true,
     useUnifiedTopology: true
+})
+.then(() => {
+    console.log('connected to MongoDB');
+})
+.catch((error)=>
+console.error('error connecting to MongoDB:', error));
+
+app.get('/reports',( req, res) => {
+    res.send('Welcome to the Incident Reporting System API!');
 });
 
 // Nodemailer setup
@@ -28,15 +37,19 @@ const transporter = nodemailer.createTransport({
 });
 
 // Endpoint to submit reports
-app.post('/reports', async (req, res) => {
-    const { collegeCode, incidentCategory, incidentType, description } = req.body;
+app.post('/reports', async (req, res) => { 
+    const { collegeCode, incidentCategory, incidentType, description, date } = req.body;
+
+    if(!collegeCode || !incidentCategory || !incidentType || !description) {
+        return res.status(400).send('All fields are required');  // Return error if any field is missing.  // {"conversationId":"588549ad-8b4e-47f5-baac-18999574956f","source":"instruct"}
+    }
 
     const report = new Report({
         collegeCode,
         incidentCategory,
         incidentType,
         description,
-        date: new Date()
+        date: date ? new Date(req.body.date) : new Date()
     });
 
     try {
@@ -47,12 +60,12 @@ app.post('/reports', async (req, res) => {
             from: process.env.EMAIL_USER,
             to: process.env.EMAIL_USER, // Send notification to yourself
             subject: 'New Incident Report Submitted',
-            text: `A new report has been submitted://+//+
-            College Code: ${collegeCode}/
-            Incident Category: ${incidentCategory}//+
-            Incident Type: ${incidentType}//+
-            Description: ${description}//+
-            Date: ${new Date()}`//+// {"conversationId":"588549ad-8b4e-47f5-baac-18999574956f","source":"instruct"}
+            text: `A new report has been submitted:\n\n
+            College Code: ${collegeCode}\n
+            Incident Category: ${incidentCategory}\n
+            Incident Type: ${incidentType}\n
+            Description: ${description}\n
+            Date: ${new Date().toLocaleString()}`//+// {"conversationId":"588549ad-8b4e-47f5-baac-18999574956f","source":"instruct"}
         };
 
         await transporter.sendMail(mailOptions);
@@ -65,5 +78,5 @@ app.post('/reports', async (req, res) => {
 });
 
 app.listen(PORT, () => {
-    console.log(`Server is running on port ${PORT}`);
+    console.log(`Server is running on http://localhost:${PORT}`);
 });
