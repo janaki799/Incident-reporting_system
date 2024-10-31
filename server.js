@@ -11,7 +11,8 @@ const PORT = process.env.PORT || 3000;
 
 // Middleware
 app.use(bodyParser.json());
-
+app.use(express.json());
+app.use(express.static('public'));
 // MongoDB connection
 mongoose.connect(process.env.MONGODB_URI, {
     useNewUrlParser: true,
@@ -23,9 +24,10 @@ mongoose.connect(process.env.MONGODB_URI, {
 .catch((error)=>
 console.error('error connecting to MongoDB:', error));
 
-app.get('/reports',( req, res) => {
-    res.send('Welcome to the Incident Reporting System API!');
-});
+
+app.get('/',( req, res) => {
+    res.sendFile(__dirname + '/index.html');
+    })
 
 // Nodemailer setup
 const transporter = nodemailer.createTransport({
@@ -39,6 +41,8 @@ const transporter = nodemailer.createTransport({
 // Endpoint to submit reports
 app.post('/reports', async (req, res) => { 
     const { collegeCode, incidentCategory, incidentType, description, date } = req.body;
+     console.log(req.body);
+    
 
     if(!collegeCode || !incidentCategory || !incidentType || !description) {
         return res.status(400).send('All fields are required');  // Return error if any field is missing.  // {"conversationId":"588549ad-8b4e-47f5-baac-18999574956f","source":"instruct"}
