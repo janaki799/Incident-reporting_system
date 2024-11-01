@@ -12,7 +12,6 @@ const PORT = process.env.PORT || 3000;
 
 // Middleware
 app.use(cors({ origin: 'https://my-frontenf-server.onrender.com' }));
-
 app.use(bodyParser.json());
 app.use(express.json());
 app.use(express.static('public'));
@@ -23,15 +22,11 @@ mongoose.connect(process.env.MONGODB_URI, {
     useUnifiedTopology: true
 })
 .then(() => {
-    console.log('connected to MongoDB');
+    console.log('Connected to MongoDB');
 })
 .catch((error) =>
-    console.error('error connecting to MongoDB:', error)
+    console.error('Error connecting to MongoDB:', error)
 );
-
-app.get('/reports', (req, res) => {
-    res.sendFile(__dirname + '/index.html');
-});
 
 // Nodemailer setup
 const transporter = nodemailer.createTransport({
@@ -39,6 +34,24 @@ const transporter = nodemailer.createTransport({
     auth: {
         user: process.env.EMAIL_USER,
         pass: process.env.EMAIL_PASS
+    }
+});
+
+// Endpoint to test email functionality
+app.get('/test-email', async (req, res) => {
+    const mailOptions = {
+        from: process.env.EMAIL_USER,
+        to: process.env.EMAIL_USER, // Change to your email for testing
+        subject: 'Test Email',
+        text: 'This is a test email to check if Nodemailer is working.'
+    };
+
+    try {
+        await transporter.sendMail(mailOptions);
+        res.send('Test email sent!');
+    } catch (error) {
+        console.error('Error sending test email:', error);
+        res.status(500).send('Failed to send test email');
     }
 });
 
@@ -76,17 +89,17 @@ app.post('/reports', async (req, res) => {
         };
 
         await transporter.sendMail(mailOptions);
-        
+        console.log('Email sent successfully'); // Log email sent status
         res.status(201).json({ message: 'Report submitted successfully!' });
     } catch (error) {
-        console.error('Error submitting report:', error);
+        console.error('Error submitting report:', error); // Log report submission error
         res.status(500).json({ error: 'Error submitting report' });
     }
 });
 
 // Use the flash routes
 app.use('/api/flash', flashRoutes);
-console.log('Recieved POST request at /api/flash');
+console.log('Received POST request at /api/flash');
 
 app.listen(PORT, () => {
     console.log(`Server is running on http://localhost:${PORT}`);
