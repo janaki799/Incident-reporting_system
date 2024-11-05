@@ -1,106 +1,186 @@
 const express = require('express');
 const mongoose = require('mongoose');
 const bodyParser = require('body-parser');
-const flashRoutes = require('./flash-root'); // Ensure this is pointing to the correct file
+const flashRoutes = require('./flash-root');
 const nodemailer = require('nodemailer');
 const cors = require('cors');
-const Report = require('./models/report'); // Assuming your report model is here
+const Report = require('./models/report');
 require('dotenv').config();
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Middleware
-app.use(cors({ origin: 'https://my-frontenf-server.onrender.com' }));
+// Enhanced logging function
+const logInfo = (location, message, data = {}) => {
+    console.log(`[${new Date().toISOString()}] ${location}:`, message, data);
+};
+
+const logError = (location, error) => {
+    console.error(`[${new Date().toISOString()}] Error in ${location}:`, {
+        message: error.message,
+        stack: error.stack
+    });
+};
+
+// Updated CORS configuration
+const corsOptions = {
+    origin: function(origin, callback) {
+        const allowedOrigins = [
+            'https://my-frontenf-server.onrender.com',  // Production frontend
+            'http://127.0.0.1:5500',                    // Local development
+            'http://localhost:5500'                     // Alternative local
+        ];
+        
+        if (!origin || allowedOrigins.includes(origin)) {
+            callback(null, true);
+        } else {
+            logInfo('CORS', `Blocked request from origin: ${origin}`);
+            callback(new Error('Not allowed by CORS'));
+        }
+    },
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Authorization', 'Content-Type'],
+    credentials: true,
+    maxAge: 86400
+};
+
+app.use(cors(corsOptions));
 app.use(bodyParser.json());
-app.use(express.json());
 app.use(express.static('public'));
 
-// MongoDB connection
-mongoose.connect(process.env.MONGODB_URI, {
-    useNewUrlParser: true,
-    useUnifiedTopology: true
-})
-.then(() => {
-    console.log('Connected to MongoDB');
-})
-.catch((error) =>
-    console.error('Error connecting to MongoDB:', error)
-);
+// MongoDB connection with retry logic
+const connectToMongoDB = async () => {
+    try {
+        await mongoose.connect(process.env.MONGODB_URI, {
+            useNewUrlParser: true,
+            useUnifiedTopology: true,
+            serverSelectionTimeoutMS: 5000,
+            retryWrites: true
+        });
+        logInfo('MongoDB', 'Connected successfully');
+    } catch (error) {
+        logError('MongoDB Connection', error);
+        setTimeout(connectToMongoDB, 5000);
+    }
+};
 
-// Nodemailer setup
+connectToMongoDB();
+
+// Email configuration
 const transporter = nodemailer.createTransport({
-    service: 'gmail', // You can use other email services
+    service: 'gmail',
     auth: {
         user: process.env.EMAIL_USER,
         pass: process.env.EMAIL_PASS
+    },
+    tls: {
+        rejectUnauthorized: false
     }
 });
 
-// Endpoint to test email functionality
-app.get('/test-email', async (req, res) => {
-    const mailOptions = {
-        from: process.env.EMAIL_USER,
-        to: process.env.EMAIL_USER, // Change to your email for testing
-        subject: 'Test Email',
-        text: 'This is a test email to check if Nodemailer is working.'
-    };
-
-    try {
-        await transporter.sendMail(mailOptions);
-        res.send('Test email sent!');
-    } catch (error) {
-        console.error('Error sending test email:', error);
-        res.status(500).send('Failed to send test email');
+// Verify email configuration
+transporter.verify((error, success) => {
+    if (error) {
+        logError('Email Configuration', error);
+    } else {
+        logInfo('Email', 'Server is ready to send emails');
     }
 });
 
-// Endpoint to submit reports
-app.post('/reports', async (req, res) => { 
-    const { collegeCode, incidentCategory, incidentType, description, date } = req.body;
-    console.log('Received report:', req.body);
+// Root route
+app.get('/', (req, res) => {
+    res.send('Welcome to the Reporting API!');
+});
 
-    if (!collegeCode || !incidentCategory || !incidentType || !description) {
-        return res.status(400).send('All fields are required'); // Return error if any field is missing.
-    }
-
-    const report = new Report({
-        collegeCode,
-        incidentCategory,
-        incidentType,
-        description,
-        date: date ? new Date(date) : new Date()
+// Health check endpoint
+app.get('/health', (req, res) => {
+    res.json({
+        status: 'up',
+        mongodb: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected',
+        timestamp: new Date().toISOString()
     });
+});
+
+// Reports endpoint
+app.post('/reports', async (req, res) => {
+    logInfo('Reports', 'Received new report request', { body: req.body });
+
+    const { collegeCode, incidentCategory, incidentType, description, date } = req.body;
+
+    // Validation
+    if (!collegeCode || !incidentCategory || !incidentType || !description) {
+        return res.status(400).json({
+            error: 'Missing required fields',
+            requiredFields: ['collegeCode', 'incidentCategory', 'incidentType', 'description']
+        });
+    }
 
     try {
+        // Create and save report
+        const report = new Report({
+            collegeCode,
+            incidentCategory,
+            incidentType,
+            description,
+            date: date ? new Date(date) : new Date()
+        });
+
         await report.save();
+        logInfo('Reports', 'Report saved successfully', { id: report._id });
 
         // Send email notification
         const mailOptions = {
             from: process.env.EMAIL_USER,
-            to: process.env.EMAIL_USER, // Send notification to yourself
+            to: process.env.EMAIL_USER,
             subject: 'New Incident Report Submitted',
-            text: `A new report has been submitted:\n\n
-            College Code: ${collegeCode}\n
-            Incident Category: ${incidentCategory}\n
-            Incident Type: ${incidentType}\n
-            Description: ${description}\n
-            Date: ${new Date().toLocaleString()}`
+            html: `
+                <h2>New Report Details:</h2>
+                <p><strong>ID:</strong> ${report._id}</p>
+                <p><strong>College Code:</strong> ${collegeCode}</p>
+                <p><strong>Category:</strong> ${incidentCategory}</p>
+                <p><strong>Type:</strong> ${incidentType}</p>
+                <p><strong>Description:</strong> ${description}</p>
+                <p><strong>Date:</strong> ${new Date().toLocaleString()}</p>
+                <hr>
+                <p><small>Environment: ${process.env.NODE_ENV || 'development'}</small></p>
+            `
         };
 
         await transporter.sendMail(mailOptions);
-        console.log('Email sent successfully'); // Log email sent status
-        res.status(201).json({ message: 'Report submitted successfully!' });
+        logInfo('Email', 'Notification sent successfully');
+
+        res.status(201).json({
+            message: 'Report submitted successfully!',
+            reportId: report._id,
+            emailSent: true
+        });
     } catch (error) {
-        console.error('Error submitting report:', error); // Log report submission error
-        res.status(500).json({ error: 'Error submitting report' });
+        logError('Report Submission', error);
+        res.status(500).json({
+            error: 'Error submitting report',
+            details: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
+        });
     }
 });
 
-// Use the flash routes
+// Use flash routes
 app.use('/api/flash', flashRoutes);
-console.log('Received POST request at /api/flash');
+
+// Global error handler
+app.use((err, req, res, next) => {
+    logError('Global', err);
+    res.status(500).json({
+        error: 'Internal Server Error',
+        message: process.env.NODE_ENV === 'development' ? err.message : 'Something went wrong'
+    });
+});
 
 app.listen(PORT, () => {
-    console.log(`Server is running on http://localhost:${PORT}`);
+    logInfo('Server', `Running on port ${PORT}`);
+    logInfo('Environment', process.env.NODE_ENV || 'development');
 });
+
+
+
+
+
