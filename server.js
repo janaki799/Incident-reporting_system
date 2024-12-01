@@ -2,7 +2,7 @@ const express = require('express');
 const mongoose = require('mongoose');
 const bodyParser = require('body-parser');
 const flashRoutes = require('./flash-root');
-const nodemailer = require('nodemailer');
+const twilio = require('twilio');
 const cors = require('cors');
 const Report = require('./models/report');
 require('dotenv').config();
@@ -24,13 +24,13 @@ const logError = (location, error) => {
 
 // Updated CORS configuration
 const corsOptions = {
-    origin: function(origin, callback) {
+    origin: function (origin, callback) {
         const allowedOrigins = [
-            'https://my-frontenf-server.onrender.com',  // Production frontend
-            'http://127.0.0.1:5500',                    // Local development
-            'http://localhost:5500'                     // Alternative local
+            'https://my-frontenf-server.onrender.com',
+            'http://127.0.0.1:5500',
+            'http://localhost:5500'
         ];
-        
+
         if (!origin || allowedOrigins.includes(origin)) {
             callback(null, true);
         } else {
@@ -66,26 +66,8 @@ const connectToMongoDB = async () => {
 
 connectToMongoDB();
 
-// Email configuration
-const transporter = nodemailer.createTransport({
-    service: 'gmail',
-    auth: {
-        user: process.env.EMAIL_USER,
-        pass: process.env.EMAIL_PASS
-    },
-    tls: {
-        rejectUnauthorized: false
-    }
-});
-
-// Verify email configuration
-transporter.verify((error, success) => {
-    if (error) {
-        logError('Email Configuration', error);
-    } else {
-        logInfo('Email', 'Server is ready to send emails');
-    }
-});
+// Initialize Twilio client using your credentials
+const client = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
 
 // Root route
 app.get('/', (req, res) => {
@@ -128,31 +110,39 @@ app.post('/reports', async (req, res) => {
         await report.save();
         logInfo('Reports', 'Report saved successfully', { id: report._id });
 
-        // Send email notification
-        const mailOptions = {
-            from: process.env.EMAIL_USER,
-            to: process.env.EMAIL_USER,
-            subject: 'New Incident Report Submitted',
-            html: `
-                <h2>New Report Details:</h2>
-                <p><strong>ID:</strong> ${report._id}</p>
-                <p><strong>College Code:</strong> ${collegeCode}</p>
-                <p><strong>Category:</strong> ${incidentCategory}</p>
-                <p><strong>Type:</strong> ${incidentType}</p>
-                <p><strong>Description:</strong> ${description}</p>
-                <p><strong>Date:</strong> ${new Date().toLocaleString()}</p>
-                <hr>
-                <p><small>Environment: ${process.env.NODE_ENV || 'development'}</small></p>
-            `
-        };
+        // Prepare the message body
+        const messageBody = `
+            New Report Details:
+            ID: ${report._id}
+            College Code: ${collegeCode}
+            Category: ${incidentCategory}
+            Type: ${incidentType}
+            Description: ${description}
+            Date: ${new Date().toLocaleString()}
+        `;
 
-        await transporter.sendMail(mailOptions);
-        logInfo('Email', 'Notification sent successfully');
+        // Send SMS notifications to all phone numbers
+        const phoneNumbers = process.env.NOTIFY_PHONE_NUMBERS.split(','); // Comma-separated numbers
+        const sentMessages = [];
+
+        for (const number of phoneNumbers) {
+            try {
+                const messageSent = await client.messages.create({
+                    body: messageBody,
+                    messagingServiceSid: process.env.TWILIO_MESSAGING_SERVICE_SID,
+                    to: number.trim()
+                });
+                sentMessages.push({ number: number.trim(), sid: messageSent.sid });
+                logInfo('Twilio', `SMS sent successfully to ${number.trim()}`, { messageSid: messageSent.sid });
+            } catch (smsError) {
+                logError(`Twilio SMS to ${number.trim()}`, smsError);
+            }
+        }
 
         res.status(201).json({
             message: 'Report submitted successfully!',
             reportId: report._id,
-            emailSent: true
+            smsSent: sentMessages.length > 0
         });
     } catch (error) {
         logError('Report Submission', error);
@@ -179,7 +169,6 @@ app.listen(PORT, () => {
     logInfo('Server', `Running on port ${PORT}`);
     logInfo('Environment', process.env.NODE_ENV || 'development');
 });
-
 
 
 
