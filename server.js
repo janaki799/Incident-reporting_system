@@ -1,174 +1,142 @@
+// Required Dependencies
+require('dotenv').config(); // Load environment variables
 const express = require('express');
 const mongoose = require('mongoose');
-const bodyParser = require('body-parser');
-const flashRoutes = require('./flash-root');
-const twilio = require('twilio');
+const multer = require('multer');
 const cors = require('cors');
-const Report = require('./models/report');
-require('dotenv').config();
+const nodemailer = require('nodemailer');
+const path = require('path');
+const fs = require('fs');
 
 const app = express();
-const PORT = process.env.PORT || 3000;
 
-// Enhanced logging function
-const logInfo = (location, message, data = {}) => {
-    console.log(`[${new Date().toISOString()}] ${location}:`, message, data);
-};
+// Ensure uploads directory exists
+const uploadsDir = path.join(__dirname, 'uploads');
+if (!fs.existsSync(uploadsDir)) {
+    fs.mkdirSync(uploadsDir);
+}
 
-const logError = (location, error) => {
-    console.error(`[${new Date().toISOString()}] Error in ${location}:`, {
-        message: error.message,
-        stack: error.stack
-    });
-};
+// Middleware Setup
+app.use(express.json()); // Parse JSON request bodies
+app.use(express.urlencoded({ extended: true })); // Parse URL-encoded request bodies
 
-// Updated CORS configuration
-const corsOptions = {
-    origin: function (origin, callback) {
-        const allowedOrigins = [
-            'https://my-frontenf-server.onrender.com',
-            'http://127.0.0.1:5500',
-            'http://localhost:5500'
-        ];
+// CORS Setup
+app.use(cors({
+    origin: [
+        'https://my-frontenf-server.onrender.com', // Production frontend
+        'http://127.0.0.1:5500',                  // Local development
+        'http://localhost:5500'                   // Alternate local development
+    ],
+    methods: ['GET', 'POST'], // Allowed HTTP methods
+    credentials: true          // Include credentials in requests if necessary
+}));
 
-        if (!origin || allowedOrigins.includes(origin)) {
-            callback(null, true);
-        } else {
-            logInfo('CORS', `Blocked request from origin: ${origin}`);
-            callback(new Error('Not allowed by CORS'));
-        }
+app.use('/uploads', express.static(uploadsDir)); // Serve uploaded files
+
+// File Upload Setup (Multer)
+const storage = multer.diskStorage({
+    destination: (req, file, cb) => {
+        cb(null, uploadsDir);
     },
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Authorization', 'Content-Type'],
-    credentials: true,
-    maxAge: 86400
-};
-
-app.use(cors(corsOptions));
-app.use(bodyParser.json());
-app.use(express.static('public'));
-
-// MongoDB connection with retry logic
-const connectToMongoDB = async () => {
-    try {
-        await mongoose.connect(process.env.MONGODB_URI, {
-            useNewUrlParser: true,
-            useUnifiedTopology: true,
-            serverSelectionTimeoutMS: 5000,
-            retryWrites: true
-        });
-        logInfo('MongoDB', 'Connected successfully');
-    } catch (error) {
-        logError('MongoDB Connection', error);
-        setTimeout(connectToMongoDB, 5000);
+    filename: (req, file, cb) => {
+        cb(null, Date.now() + '-' + file.originalname);
     }
-};
-
-connectToMongoDB();
-
-// Initialize Twilio client using your credentials
-const client = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
-
-// Root route
-app.get('/', (req, res) => {
-    res.send('Welcome to the Reporting API!');
 });
+const upload = multer({ storage: storage });
 
-// Health check endpoint
-app.get('/health', (req, res) => {
-    res.json({
-        status: 'up',
-        mongodb: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected',
-        timestamp: new Date().toISOString()
+// MongoDB Connection
+mongoose.connect(process.env.MONGODB_URI)
+    .then(() => console.log("Connected to MongoDB"))
+    .catch((err) => {
+        console.error("MongoDB connection error:", err);
+        process.exit(1); // Exit the process if DB connection fails
     });
+
+// Define the Report Schema
+const reportSchema = new mongoose.Schema({
+    collegeCode: { type: String, required: true },
+    incidentCategory: { type: String, required: true },
+    incidentType: { type: String, required: true },
+    description: { type: String, required: true },
+    image: { type: String, required: false },
+    timestamp: { type: String, required: true }
+});
+const Report = mongoose.model('Report', reportSchema);
+
+// Nodemailer Setup
+const transporter = nodemailer.createTransport({
+    service: 'gmail',
+    auth: {
+        user: process.env.EMAIL_USER,
+        pass: process.env.EMAIL_PASS
+    }
 });
 
-// Reports endpoint
-app.post('/reports', async (req, res) => {
-    logInfo('Reports', 'Received new report request', { body: req.body });
+// POST Route to Submit a Report
+app.post('/reports', upload.single('image'), async (req, res) => {
+    const { collegeCode, incidentCategory, incidentType, description, timestamp } = req.body;
+    const image = req.file ? `/uploads/${req.file.filename}` : null;
 
-    const { collegeCode, incidentCategory, incidentType, description, date } = req.body;
-
-    // Validation
-    if (!collegeCode || !incidentCategory || !incidentType || !description) {
-        return res.status(400).json({
-            error: 'Missing required fields',
-            requiredFields: ['collegeCode', 'incidentCategory', 'incidentType', 'description']
-        });
-    }
+    // Log the file and request body for debugging
+    console.log("Request Body:", req.body);
+    console.log("Uploaded File:", req.file);
 
     try {
-        // Create and save report
-        const report = new Report({
+        // Save Report to MongoDB
+        const newReport = new Report({
             collegeCode,
             incidentCategory,
             incidentType,
             description,
-            date: date ? new Date(date) : new Date()
+            image,
+            timestamp
         });
+        await newReport.save();
 
-        await report.save();
-        logInfo('Reports', 'Report saved successfully', { id: report._id });
+        // Construct Email Message
+        let emailBody = `<p>New incident report submitted:</p>
+            <ul>
+                <li><strong>College Code:</strong> ${collegeCode}</li>
+                <li><strong>Category:</strong> ${incidentCategory}</li>
+                <li><strong>Type:</strong> ${incidentType}</li>
+                <li><strong>Description:</strong> ${description}</li>
+                <li><strong>Time:</strong> ${timestamp}</li>
+            </ul>`;
 
-        // Prepare the message body
-        const messageBody = `
-            New Report Details:
-            ID: ${report._id}
-            College Code: ${collegeCode}
-            Category: ${incidentCategory}
-            Type: ${incidentType}
-            Description: ${description}
-            Date: ${new Date().toLocaleString()}
-        `;
-
-        // Send SMS notifications to all phone numbers
-        const phoneNumbers = process.env.NOTIFY_PHONE_NUMBERS.split(','); // Comma-separated numbers
-        const sentMessages = [];
-
-        for (const number of phoneNumbers) {
-            try {
-                const messageSent = await client.messages.create({
-                    body: messageBody,
-                    messagingServiceSid: process.env.TWILIO_MESSAGING_SERVICE_SID,
-                    to: number.trim()
-                });
-                sentMessages.push({ number: number.trim(), sid: messageSent.sid });
-                logInfo('Twilio', `SMS sent successfully to ${number.trim()}`, { messageSid: messageSent.sid });
-            } catch (smsError) {
-                logError(`Twilio SMS to ${number.trim()}`, smsError);
-            }
+        if (image) {
+            const imageUrl = `${req.protocol}://${req.get('host')}/uploads/${path.basename(req.file.path)}`;
+            emailBody += `<p><strong>Image:</strong> <a href="${imageUrl}">${imageUrl}</a></p>`;
         }
 
-        res.status(201).json({
-            message: 'Report submitted successfully!',
-            reportId: report._id,
-            smsSent: sentMessages.length > 0
-        });
+        // Send Email
+        const mailOptions = {
+            from: process.env.EMAIL_USER,
+            to: process.env.EMAIL_USER, // Change if sending to another recipient
+            subject: 'New Incident Report Submitted',
+            html: emailBody
+        };
+
+        await transporter.sendMail(mailOptions);
+
+        // Respond with success
+        res.status(200).json({ message: 'Report submitted and email notification sent!' });
     } catch (error) {
-        logError('Report Submission', error);
-        res.status(500).json({
-            error: 'Error submitting report',
-            details: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
-        });
+        console.error('Error saving report or sending email:', error);
+        res.status(500).json({ error: 'Failed to save report or send notification.' });
     }
 });
 
-// Use flash routes
-app.use('/api/flash', flashRoutes);
-
-// Global error handler
-app.use((err, req, res, next) => {
-    logError('Global', err);
-    res.status(500).json({
-        error: 'Internal Server Error',
-        message: process.env.NODE_ENV === 'development' ? err.message : 'Something went wrong'
-    });
+// Test Endpoint (Optional for Debugging)
+app.get('/', (req, res) => {
+    res.send('Server is running!');
 });
 
+// Start Server
+const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-    logInfo('Server', `Running on port ${PORT}`);
-    logInfo('Environment', process.env.NODE_ENV || 'development');
+    console.log(`Server running on http://localhost:${PORT}`);
 });
+
 
 
 
