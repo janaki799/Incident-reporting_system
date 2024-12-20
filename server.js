@@ -1,140 +1,186 @@
-// Required Dependencies
-require('dotenv').config(); // Load environment variables
+// server.js
 const express = require('express');
 const mongoose = require('mongoose');
-const multer = require('multer');
-const cors = require('cors');
+const bodyParser = require('body-parser');
 const nodemailer = require('nodemailer');
+const cors = require('cors');
 const path = require('path');
-const fs = require('fs');
+const favicon = require('serve-favicon');
+const Report = require('./models/report');
+require('dotenv').config();
 
 const app = express();
+const PORT = process.env.PORT || 3001;
 
-// Ensure uploads directory exists
-const uploadsDir = path.join(__dirname, 'uploads');
-if (!fs.existsSync(uploadsDir)) {
-    fs.mkdirSync(uploadsDir);
-}
+const allowedOrigins = [
+    'https://frontend-8ecmtkquq-janaki799s-projects.vercel.app',
+    'http://localhost:3000',
+    'http://localhost:3001'
+];
 
-// Middleware Setup
-app.use(express.json()); // Parse JSON request bodies
-app.use(express.urlencoded({ extended: true })); // Parse URL-encoded request bodies
-
-// CORS Setup
 app.use(cors({
-    origin: [
-        'https://my-frontenf-server.onrender.com', // Production frontend
-        'http://127.0.0.1:5500',                  // Local development
-        'http://localhost:5500'                   // Alternate local development
-    ],
-    methods: ['GET', 'POST'], // Allowed HTTP methods
-    credentials: true          // Include credentials in requests if necessary
+    origin: allowedOrigins,
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Authorization', 'Content-Type'],
+    credentials: true,
+    maxAge: 86400
 }));
 
-app.use('/uploads', express.static(uploadsDir)); // Serve uploaded files
+app.use(bodyParser.json());
+app.use(express.static('public'));
+app.use(favicon(path.join(__dirname, 'public', 'favicon.ico')));
 
-// File Upload Setup (Multer)
-const storage = multer.diskStorage({
-    destination: (req, file, cb) => {
-        cb(null, uploadsDir);
-    },
-    filename: (req, file, cb) => {
-        cb(null, Date.now() + '-' + file.originalname);
+app.use((req, res, next) => {
+    console.log(`[${new Date().toISOString()}] ${req.method} ${req.url}`);
+    next();
+});
+
+async function connectDB() {
+    try {
+        await mongoose.connect(process.env.MONGODB_URI);
+        console.log('MongoDB Connected Successfully');
+    } catch (err) {
+        console.error('MongoDB Connection Error:', err);
+        process.exit(1);
     }
+}
+
+connectDB();
+
+mongoose.connection.on('error', err => {
+    console.error('MongoDB connection error:', err);
 });
-const upload = multer({ storage: storage });
 
-// MongoDB Connection
-mongoose.connect(process.env.MONGODB_URI)
-    .then(() => console.log("Connected to MongoDB"))
-    .catch((err) => {
-        console.error("MongoDB connection error:", err);
-        process.exit(1); // Exit the process if DB connection fails
-    });
-
-// Define the Report Schema
-const reportSchema = new mongoose.Schema({
-    collegeCode: { type: String, required: true },
-    incidentCategory: { type: String, required: true },
-    incidentType: { type: String, required: true },
-    description: { type: String, required: true },
-    image: { type: String, required: false },
-    timestamp: { type: String, required: true }
+mongoose.connection.on('disconnected', () => {
+    console.log('MongoDB disconnected');
 });
-const Report = mongoose.model('Report', reportSchema);
 
-// Nodemailer Setup
 const transporter = nodemailer.createTransport({
     service: 'gmail',
     auth: {
         user: process.env.EMAIL_USER,
         pass: process.env.EMAIL_PASS
+    },
+    tls: {
+        rejectUnauthorized: true
     }
 });
 
-// POST Route to Submit a Report
-app.post('/reports', upload.single('image'), async (req, res) => {
-    const { collegeCode, incidentCategory, incidentType, description, timestamp } = req.body;
-    const image = req.file ? `/uploads/${req.file.filename}` : null;
+transporter.verify(function(error, success) {
+    if (error) {
+        console.log('Email configuration error:', error);
+    } else {
+        console.log("Email server is ready");
+    }
+});
 
-    // Log the file and request body for debugging
-    console.log("Request Body:", req.body);
-    console.log("Uploaded File:", req.file);
-
+/**
+ * Handles the '/health' GET request to check the server's health.
+ *
+ * @param {import('express').Request} req - The Express request object.
+ * @param {import('express').Response} res - The Express response object.
+ * @returns {void}
+ */
+app.get('/health', async (req, res) => {
     try {
-        // Save Report to MongoDB
-        const newReport = new Report({
+        const dbState = mongoose.connection.readyState;
+        const dbStatus = {
+            0: 'disconnected',
+            1: 'connected',
+            2: 'connecting',
+            3: 'disconnecting'
+        };
+
+        res.json({
+            status: 'healthy',
+            timestamp: new Date().toISOString(),
+            mongodb: dbStatus[dbState] || 'unknown',
+            environment: process.env.NODE_ENV
+        });
+    } catch (error) {
+        res.status(500).json({
+            status: 'unhealthy',
+            error: error.message
+        });
+    }
+});
+
+app.get('/', (req, res) => {
+    res.send('Incident Reporting API is running');
+});
+
+app.post('/reports', async (req, res) => {
+    try {
+        const { collegeCode, incidentCategory, incidentType, description, date } = req.body;
+
+        if (!collegeCode || !incidentCategory || !incidentType || !description) {
+            return res.status(400).json({
+                error: 'Missing required fields',
+                requiredFields: ['collegeCode', 'incidentCategory', 'incidentType', 'description']
+            });
+        }
+
+        const report = new Report({
             collegeCode,
             incidentCategory,
             incidentType,
             description,
-            image,
-            timestamp
+            date: date || new Date()
         });
-        await newReport.save();
 
-        // Construct Email Message
-        let emailBody = `<p>New incident report submitted:</p>
-            <ul>
-                <li><strong>College Code:</strong> ${collegeCode}</li>
-                <li><strong>Category:</strong> ${incidentCategory}</li>
-                <li><strong>Type:</strong> ${incidentType}</li>
-                <li><strong>Description:</strong> ${description}</li>
-                <li><strong>Time:</strong> ${timestamp}</li>
-            </ul>`;
+        await report.save();
 
-        if (image) {
-            const imageUrl = `${req.protocol}://${req.get('host')}/uploads/${path.basename(req.file.path)}`;
-            emailBody += `<p><strong>Image:</strong> <a href="${imageUrl}">${imageUrl}</a></p>`;
+        try {
+            await transporter.sendMail({
+                from: process.env.EMAIL_USER,
+                to: process.env.EMAIL_USER,
+                subject: 'New Incident Report',
+                html: `
+                    <h2>New Incident Report</h2>
+                    <p><strong>College Code:</strong> ${collegeCode}</p>
+                    <p><strong>Category:</strong> ${incidentCategory}</p>
+                    <p><strong>Type:</strong> ${incidentType}</p>
+                    <p><strong>Description:</strong> ${description}</p>
+                    <p><strong>Date:</strong> ${new Date().toLocaleString()}</p>
+                `
+            });
+        } catch (emailError) {
+            console.error('Email sending failed:', emailError);
         }
 
-        // Send Email
-        const mailOptions = {
-            from: process.env.EMAIL_USER,
-            to: process.env.EMAIL_USER, // Change if sending to another recipient
-            subject: 'New Incident Report Submitted',
-            html: emailBody
-        };
-
-        await transporter.sendMail(mailOptions);
-
-        // Respond with success
-        res.status(200).json({ message: 'Report submitted and email notification sent!' });
+        res.status(201).json({
+            success: true,
+            message: 'Report submitted successfully',
+            reportId: report._id
+        });
     } catch (error) {
-        console.error('Error saving report or sending email:', error);
-        res.status(500).json({ error: 'Failed to save report or send notification.' });
+        console.error('Report submission error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Error submitting report',
+            error: process.env.NODE_ENV === 'production' ? 'Internal server error' : error.message
+        });
     }
 });
 
-// Test Endpoint (Optional for Debugging)
-app.get('/', (req, res) => {
-    res.send('Server is running!');
+app.use((err, req, res, next) => {
+    console.error(err.stack);
+    res.status(500).json({
+        success: false,
+        message: 'Something went wrong!',
+        error: process.env.NODE_ENV === 'production' ? 'Internal server error' : err.message
+    });
 });
 
-// Start Server
-const PORT = process.env.PORT || 3000;
+process.on('SIGTERM', async () => {
+    console.log('SIGTERM received. Shutting down gracefully...');
+    await mongoose.connection.close();
+    process.exit(0);
+});
+
 app.listen(PORT, () => {
-    console.log(`Server running on http://localhost:${PORT}`);
+    console.log(`Server running on port ${PORT}`);
+    console.log('Environment:', process.env.NODE_ENV);
 });
 
 
