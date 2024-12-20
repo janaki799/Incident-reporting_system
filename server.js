@@ -11,7 +11,7 @@ const app = express();
 const PORT = process.env.PORT || 3001;
 
 const allowedOrigins = [
-    'https://frontend-8ecmtkquq-janaki799s-projects.vercel.app',
+    'https://my-frontenf-server.onrender.com',
     'http://localhost:3000',
     'http://localhost:3001'
 ];
