@@ -1,11 +1,9 @@
-// server.js
 const express = require('express');
 const mongoose = require('mongoose');
 const bodyParser = require('body-parser');
 const nodemailer = require('nodemailer');
 const cors = require('cors');
 const path = require('path');
-const favicon = require('serve-favicon');
 const Report = require('./models/report');
 require('dotenv').config();
 
@@ -28,7 +26,6 @@ app.use(cors({
 
 app.use(bodyParser.json());
 app.use(express.static('public'));
-app.use(favicon(path.join(__dirname, 'public', 'favicon.ico')));
 
 app.use((req, res, next) => {
     console.log(`[${new Date().toISOString()}] ${req.method} ${req.url}`);
@@ -37,7 +34,10 @@ app.use((req, res, next) => {
 
 async function connectDB() {
     try {
-        await mongoose.connect(process.env.MONGODB_URI);
+        await mongoose.connect(process.env.MONGODB_URI, {
+            useNewUrlParser: true,
+            useUnifiedTopology: true
+        });
         console.log('MongoDB Connected Successfully');
     } catch (err) {
         console.error('MongoDB Connection Error:', err);
@@ -182,7 +182,6 @@ app.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);
     console.log('Environment:', process.env.NODE_ENV);
 });
-
 
 
 
