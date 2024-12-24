@@ -126,6 +126,7 @@ app.post('/reports', async (req, res) => {
             incidentType,
             description,
             date: new Date(date)
+            localDate: indianTime 
         });
 
         await report.save();
