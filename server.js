@@ -8,7 +8,7 @@ const Report = require('./models/report');
 require('dotenv').config();
 
 const app = express();
-const PORT = process.env.PORT || 3001;
+const PORT = process.env.PORT || 3000;
 
 const allowedOrigins = [
     'https://my-frontenf-server.onrender.com',
@@ -125,7 +125,7 @@ app.post('/reports', async (req, res) => {
             incidentCategory,
             incidentType,
             description,
-            date: date || new Date()
+            date: new Date(date)
         });
 
         await report.save();
@@ -136,14 +136,22 @@ app.post('/reports', async (req, res) => {
                 to: process.env.EMAIL_USER,
                 subject: 'New Incident Report',
                 html: `
-                    <h2>New Incident Report</h2>
-                    <p><strong>College Code:</strong> ${collegeCode}</p>
-                    <p><strong>Category:</strong> ${incidentCategory}</p>
-                    <p><strong>Type:</strong> ${incidentType}</p>
-                    <p><strong>Description:</strong> ${description}</p>
-                    <p><strong>Date:</strong> ${new Date().toLocaleString()}</p>
-                `
-            });
+                     <h2>New Incident Report</h2>
+    <p><strong>College Code:</strong> ${collegeCode}</p>
+    <p><strong>Category:</strong> ${incidentCategory}</p>
+    <p><strong>Type:</strong> ${incidentType}</p>
+    <p><strong>Description:</strong> ${description}</p>
+    <p><strong>Date:</strong> ${new Date(date).toLocaleString('en-IN', { 
+        timeZone: 'Asia/Kolkata',  // Use Indian timezone
+        year: 'numeric',
+        month: 'numeric',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: true
+    })}</p>
+    `
         } catch (emailError) {
             console.error('Email sending failed:', emailError);
         }
