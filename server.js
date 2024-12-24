@@ -120,6 +120,8 @@ app.post('/reports', async (req, res) => {
             });
         }
 
+         const indianTime = new Date().toLocaleString("en-IN", { timeZone: "Asia/Kolkata" });
+
         const report = new Report({
             collegeCode,
             incidentCategory,
