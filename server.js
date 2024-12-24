@@ -125,7 +125,7 @@ app.post('/reports', async (req, res) => {
             incidentCategory,
             incidentType,
             description,
-            date: new Date(date)
+            date: new Date(date),
             localDate: indianTime 
         });
 
