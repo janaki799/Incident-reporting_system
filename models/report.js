@@ -7,7 +7,7 @@ const reportSchema = new mongoose.Schema({
   incidentCategory: { type: String, required: true },
   incidentType: { type: String, required: true },
   description: { type: String, required: true },
-  date: { type: Date, default: Date.now }
+  date: { type: Date, default: Date.now },
   localDate: { type: String }
 });
 
