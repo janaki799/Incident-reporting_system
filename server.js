@@ -152,6 +152,7 @@ app.post('/reports', async (req, res) => {
         hour12: true
     })}</p>
     `
+ });           
         } catch (emailError) {
             console.error('Email sending failed:', emailError);
         }
