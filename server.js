@@ -12,8 +12,8 @@ const PORT = process.env.PORT || 3000;
 
 const allowedOrigins = [
     'https://my-frontenf-server.onrender.com',
-    'http://localhost:5500',
-    'http://127.0.0.1:5500'
+    'http://localhost:3001',
+    'http://localhost:3000'
 ];
 
 app.use(cors({
