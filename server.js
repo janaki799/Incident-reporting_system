@@ -177,6 +177,14 @@ app.post('/reports', async (req, res) => {
     }
 });
 
+// Basic route protection (add before dashboard routes)
+app.get('/admin*', (req, res, next) => {
+    const SECRET_KEY = process.env.ADMIN_KEY || "temp123";
+    if (req.query.key !== SECRET_KEY) {
+        return res.status(403).send("Access denied");
+    }
+    next();
+});
 // Get all reports (with filtering)
 app.get('/admin/reports', async (req, res) => {
     try {
