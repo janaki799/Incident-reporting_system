@@ -112,7 +112,7 @@ app.get('/', (req, res) => {
 
 app.post('/reports', async (req, res) => {
     try {
-        const { collegeCode, incidentCategory, incidentType, description, date } = req.body;
+         const { collegeCode, incidentCategory, incidentType, description, date, userEmail } = req.body;
 
         if (!collegeCode || !incidentCategory || !incidentType || !description) {
             return res.status(400).json({
@@ -129,9 +129,10 @@ app.post('/reports', async (req, res) => {
             incidentType,
             description,
             date: new Date(date),
-            localDate: indianTime 
+            localDate: indianTime,
+             userEmail: userEmail || null,  // Store email only if provided
+            status: 'Pending'  // Default status        });
         });
-
         await report.save();
 
         try {
@@ -208,7 +209,23 @@ app.put('/admin/reports/:id', async (req, res) => {
             { status },
             { new: true }
         );
-        res.json({ success: true, report });
+
+        // Send email to user if they provided one
+        if (report.userEmail) {
+            await transporter.sendMail({
+                from: process.env.EMAIL_USER,
+                to: report.userEmail,
+                subject: 'Your Report Status Update',
+                html: `
+                    <p>Hi,</p>
+                    <p>The report you submitted has been marked as <strong>${status}</strong>.</p>
+                    <p>Thank you for helping improve our campus!</p>
+                    <p><em>This is an automated message. Please do not reply.</em></p>
+                `
+            });
+        }
+
+        res.json({ success: true, report: { ...report.toObject(), userEmail: undefined } }); // Hide email in response
     } catch (error) {
         res.status(500).json({ success: false, error: "Failed to update report" });
     }

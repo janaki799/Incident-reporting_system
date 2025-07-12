@@ -9,13 +9,23 @@ const reportSchema = new mongoose.Schema({
   description: { type: String, required: true },
   date: { type: Date, default: Date.now },
   localDate: { type: String },
-  status: {
+     userEmail: {
+        type: String,
+        default: null,
+        select: false  // Never include in queries unless explicitly requested
+    },
+    status: {
         type: String,
         enum: ['Pending', 'In Progress', 'Resolved'],
         default: 'Pending'
-    },
+    }
 });
 
+reportSchema.methods.toJSON = function() {
+    const report = this.toObject();
+    delete report.userEmail;
+    return report;
+};
 // Report Model
 const Report = mongoose.model('Report', reportSchema);
 
