@@ -204,29 +204,45 @@ app.get('/admin/reports', async (req, res) => {
 app.put('/admin/reports/:id', async (req, res) => {
     try {
         const { status } = req.body;
-        const report = await Report.findByIdAndUpdate(
-            req.params.id,
-            { status },
-            { new: true }
-        );
-
-        // Send email to user if they provided one
-        if (report.userEmail) {
-            await transporter.sendMail({
-                from: process.env.EMAIL_USER,
-                to: report.userEmail,
-                subject: 'Your Report Status Update',
-                html: `
-                    <p>Hi,</p>
-                    <p>The report you submitted has been marked as <strong>${status}</strong>.</p>
-                    <p>Thank you for helping improve our campus!</p>
-                    <p><em>This is an automated message. Please do not reply.</em></p>
-                `
-            });
+        
+        // 1. FIRST find the report WITH email included
+        const report = await Report.findById(req.params.id).select('+userEmail');
+        
+        if (!report) {
+            return res.status(404).json({ success: false, error: "Report not found" });
         }
 
-        res.json({ success: true, report: { ...report.toObject(), userEmail: undefined } }); // Hide email in response
+        // 2. THEN update it
+        report.status = status;
+        await report.save();
+
+        // 3. Send email if user provided one
+        if (report.userEmail) {
+            try {
+                await transporter.sendMail({
+                    from: process.env.EMAIL_USER,
+                    to: report.userEmail,
+                    subject: 'Your Report Status Update',
+                    html: `
+                        <p>Hi,</p>
+                        <p>The report you submitted has been marked as <strong>${status}</strong>.</p>
+                        <p>Thank you for helping improve our campus!</p>
+                        <p><em>This is an automated message. Please do not reply.</em></p>
+                    `
+                });
+                console.log(`Status update email sent to: ${report.userEmail}`); // Log success
+            } catch (emailError) {
+                console.error('Failed to send status email:', emailError); // Log failure
+            }
+        }
+
+        // 4. Return the report WITHOUT email
+        const responseReport = report.toObject();
+        delete responseReport.userEmail;
+        res.json({ success: true, report: responseReport });
+
     } catch (error) {
+        console.error('Status update failed:', error);
         res.status(500).json({ success: false, error: "Failed to update report" });
     }
 });
