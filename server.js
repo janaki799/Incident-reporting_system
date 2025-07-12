@@ -13,7 +13,8 @@ const PORT = process.env.PORT || 3000;
 const allowedOrigins = [
     'https://my-frontenf-server.onrender.com',
     'http://localhost:3001',
-    'http://localhost:3000'
+    'http://localhost:3000',
+    'http://127.0.0.1:5500'
 ];
 
 app.use(cors({
@@ -199,7 +200,6 @@ app.get('/admin/reports', async (req, res) => {
     }
 });
 
-// Update report status (e.g., mark as resolved)
 app.put('/admin/reports/:id', async (req, res) => {
     try {
         const { status } = req.body;
@@ -232,6 +232,3 @@ app.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);
     console.log('Environment:', process.env.NODE_ENV);
 });
-
-
-
