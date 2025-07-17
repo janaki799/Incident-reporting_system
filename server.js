@@ -110,6 +110,35 @@ app.get('/', (req, res) => {
     res.send('Incident Reporting API is running');
 });
 
+// Allow OPTIONS preflight for CORS
+app.options('/admin/reports', cors()); 
+
+// Protected admin route
+app.get('/admin/reports', async (req, res) => {
+    const SECRET_KEY = process.env.ADMIN_KEY || "temp123";
+    
+    // Key check
+    if (req.query.key !== SECRET_KEY) {
+        return res.status(403).json({ error: "Access denied" });
+    }
+
+    try {
+        const { status, category, sortBy } = req.query;
+        let query = {};
+        
+        if (status) query.status = status;
+        if (category) query.incidentCategory = category;
+        
+        let reports = await Report.find(query);
+        
+        // Sorting
+        reports.sort((a, b) => sortBy === 'oldest' ? a.date - b.date : b.date - a.date);
+        
+        res.json({ success: true, reports });
+    } catch (error) {
+        res.status(500).json({ success: false, error: "Database error" });
+    }
+});
 app.post('/reports', async (req, res) => {
     try {
          const { collegeCode, incidentCategory, incidentType, description, date, userEmail } = req.body;
